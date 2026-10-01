@@ -25,6 +25,7 @@ The reranking helper is an optional bonus exercise and may remain unimplemented.
 
 from __future__ import annotations
 
+from email.mime import text
 import json
 from multiprocessing import context
 import re
@@ -368,9 +369,17 @@ def rerank_by_overlap(contexts: list[str], query: str) -> list[str]:
     Hint: sorted(contexts, key=lambda c: len(_tokenize(c) & _tokenize(query)),
                  reverse=True)
     """
-    # TODO (Bonus — Exercise 3.5): implement the reranker
-    raise NotImplementedError("Implement rerank_by_overlap")
+    def _tokenize(text: str) -> set[str]:
+        return set(text.lower().split())
 
+    query_tokens = _tokenize(query)
+
+    # Sắp xếp danh sách contexts giảm dần theo số lượng từ trùng khớp
+    return sorted(
+        contexts,
+        key=lambda c: len(_tokenize(c) & query_tokens),
+        reverse=True
+    )
 
 # ---------------------------------------------------------------------------
 # Task 3 — LLM Judge
