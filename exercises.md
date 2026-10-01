@@ -28,13 +28,13 @@ Theo bài giảng:
 Với từng metric, xác định khi nào score thấp có thể chấp nhận và khi nào là
 critical.
 
-| Metric | Acceptable Low Score Scenario | Critical Low Score Scenario | Action Required |
-|---|---|---|---|
-| Faithfulness | | | |
-| Answer Relevance | | | |
-| Context Recall | | | |
-| Context Precision | | | |
-| Completeness | | | |
+| Metric            | Acceptable Low Score Scenario                                                                                                                          | Critical Low Score Scenario                                                                                                                                           | Action Required                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Faithfulness      | LLM diễn đạt lại bằng từ vựng hoặc cấu trúc câu khác biệt so với ngữ cảnh gốc nhưng bản chất thông tin không sai lệch.          | LLM tự bịa ra chính sách (hallucination) như tự ý kéo dài thời gian bảo hành, mâu thuẫn hoàn toàn với tài liệu.                                    | Tinh chỉnh System Prompt để ép buộc mô hình tuân thủ nghiêm ngặt ngữ cảnh (strict grounding), thêm quality gate chặn câu trả lời. |
+| Answer Relevance  | Khách hàng hỏi câu quá chung chung, khiến LLM trả lời hơi dài dòng hoặc cung cấp thông tin mở rộng không thật sự sát ý.           | Trợ lý lạc đề hoàn toàn, cung cấp thông tin cho một sản phẩm/chính sách khác hoặc lảng tránh câu hỏi.                                             | Cập nhật hướng dẫn cho LLM (prompt) để tập trung trả lời trực tiếp, hoặc thêm bước đánh giá lại query intent                    |
+| Context Recall    | Retriever bỏ sót một vài đoạn thông tin phụ trợ, nhưng vẫn lấy được đoạn chứa luận điểm chính để LLM trả lời.                | Mất hoàn toàn đoạn tài liệu cốt lõi chứa đáp án (ví dụ không tìm thấy chính sách đổi trả), khiến LLM trả lời sai hoặc báo "không biết". | Tối ưu hóa chiến lược Chunking, cải thiện embedding model, hoặc kết hợp thêm từ khóa metadata.                                        |
+| Context Precision | Tài liệu đúng bị xếp ở vị trí thấp (Top 4-5) thay vì Top 1, nhưng độ dài context window vẫn chứa đủ nội dung để LLM phân tích. | Toàn bộ Top-K kết quả truy xuất là nhiễu, đẩy thông tin quan trọng ra khỏi context window của LLM.                                                       | Áp dụng cơ chế Reranking (như Cross-Encoder) để sắp xếp lại độ ưu tiên của kết quả, hoặc dùng Hybrid Search.                     |
+| Completeness      | Bỏ sót một chi tiết nhỏ hoặc không quan trọng khi đối mặt với câu hỏi gồm quá nhiều vế phức tạp.                                   | Bỏ qua một bước bắt buộc trong quy trình (ví dụ: quên nhắc khách hàng mang theo hóa đơn khi đi bảo hành).                                          | Yêu cầu LLM chia nhỏ câu hỏi thành các ý (Chain of Thought) để đảm bảo rà soát và trả lời đầy đủ mọi vế.                    |
 
 ### Exercise 1.2 — Bias trong LLM-as-a-Judge
 
@@ -46,29 +46,38 @@ Ba bias thường gặp:
 
 **Câu 1: Thiết kế experiment phát hiện position bias với ít nhất hai conditions.**
 
-> *Câu trả lời:*
+> * **Condition 1 (Original Order):** Cung cấp cho LLM Judge hai câu trả lời theo thứ tự hiển thị là [Câu trả lời A] trước, [Câu trả lời B] sau, và yêu cầu chọn câu tốt hơn.
+> * **Condition 2 (Swapped Order):** Giữ nguyên câu hỏi và nội dung hai câu trả lời, nhưng đảo ngược thứ tự đưa vào prompt: [Câu trả lời B] trước, [Câu trả lời A] sau.
+> * **Đánh giá:** Tính toán tỉ lệ chiến thắng (win rate). Nếu tỉ lệ một câu trả lời (ví dụ A) được chọn giảm đi đáng kể khi nó bị đẩy xuống vị trí thứ 2, điều đó chứng tỏ LLM Judge đang bị thiên vị vị trí ưu tiên lựa chọn đáp án xuất hiện đầu tiên (hoặc cuối cùng).
 
 **Câu 2: Làm thế nào giảm verbosity bias bằng rubric design?**
 
-> *Câu trả lời:*
+> Bổ sung các tiêu chí phạt sự lan man và thưởng cho sự súc tích trực tiếp vào hệ thống chấm điểm.
+>
+> * **Thêm tiêu chí cụ thể:** Đưa các tiêu chí như "Tính súc tích" (Conciseness) hoặc "Mật độ thông tin" (Information Density) vào bộ tiêu chuẩn đánh giá.
+> * **Explicit Instructions (Chỉ thị rõ ràng):** Cập nhật system prompt của LLM Judge với các yêu cầu như: *"Trừ điểm nếu câu trả lời chứa thông tin dư thừa, lặp lại hoặc không liên quan. Không tự động cho điểm cao hơn đối với các câu trả lời dài mà không bổ sung thêm giá trị cốt lõi giải quyết đúng trọng tâm câu hỏi."*
 
 **Câu 3: Tại sao cần calibrate LLM judge với human labels?**
 
-> *Câu trả lời:*
+ Để đảm bảo thước đo tự động của máy đồng cấp với nhận thức và Ground Truth.
+
+* LLM Judge có thể tự tin chấm điểm sai hoặc bị ảnh hưởng bởi các bias do dữ liệu huấn luyện của chính nó. Việc so sánh điểm của LLM với Human Labels giúp đo lường hệ số tương quan (ví dụ: Pearson hoặc Spearman correlation). Nếu độ tương quan thấp, bạn sẽ biết bộ Rubric hoặc Prompt đánh giá hiện tại đang có vấn đề (chấm quá lỏng, quá chặt, hoặc sai tiêu chí) và cần phải được tinh chỉnh lại trước khi đưa vào chạy pipeline tự động hóa ở quy mô lớn.
 
 ### Exercise 1.3 — Evaluation trong CI/CD
 
 **Câu 1: Chọn threshold để block deployment.**
 
-| Metric | Threshold | Lý do |
-|---|---:|---|
-| Faithfulness | | |
-| Answer Relevance | | |
-| Completeness | | |
+| Metric           | Threshold | Lý do                                                                                                                                                                                                                                                                                                                            |
+| ---------------- | --------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Faithfulness     |       0.9 | Đây là chỉ số quan trọng nhất. Nếu hệ thống tự bịa ra thông tin về giá cả, bảo hành hay chính sách, cửa hàng sẽ chịu rủi ro về uy tín và tài chính. Cần một ngưỡng cực kỳ khắt khe để đảm bảo câu trả lời luôn trung thành với Knowledge Base.                                   |
+| Answer Relevance |      0.85 | Việc trợ lý trả lời vòng vo hoặc lạc đề gây trải nghiệm xấu, nhưng ít nghiêm trọng hơn việc nói sai sự thật. Ngưỡng 0.85 đủ cao để đảm bảo hệ thống hiểu và giải quyết đúng trọng tâm nhu cầu của khách hàng, đồng thời cho phép một chút linh hoạt trong cách diễn đạt. |
+| Completeness     |       0.8 | Khách hàng thường chấp nhận việc AI trả lời thiếu một vài chi tiết nhỏ (và họ có thể hỏi thêm để làm rõ). Ngưỡng 0.80 đảm bảo các vế chính của câu hỏi phức tạp được giải quyết, không cần quá khắt khe chặn deploy nếu thiếu một ý phụ.                                      |
 
 **Câu 2: Khi nào dùng offline evaluation, online evaluation và human review?**
 
-> *Câu trả lời:*
+> * **Offline Evaluation (Đánh giá ngoại tuyến):** Dùng trong giai đoạn phát triển và quy trình CI/CD trước khi đưa hệ thống lên production. Đánh giá được thực hiện trên Golden Dataset để kiểm tra các thay đổi mới (như đổi prompt, đổi mô hình, thay thuật toán chunking) có làm giảm chất lượng hệ thống so với phiên bản trước hay không.
+> * **Online Evaluation (Đánh giá trực tuyến):** Dùng khi hệ thống đang chạy thực tế. Mục tiêu là giám sát hiệu suất liên tục dựa trên các tương tác thật của người dùng. Phương pháp này thường sử dụng các tín hiệu ngầm (như thời gian đọc, click) hoặc phản hồi trực tiếp (thumbs up/down) kết hợp với LLM Judge chạy ngầm để phát hiện xu hướng câu hỏi mới hoặc các lỗi mà tập dữ liệu offline chưa bao phủ được.
+> * **Human Review (Đánh giá bởi con người):** Dùng để hiệu chuẩn độ chính xác của công cụ LLM-as-a-Judge, kiểm toán định kỳ chất lượng hệ thống, hoặc xử lý các trường hợp hệ thống gặp lỗi nghiêm trọng (edge cases/low confidence). Con người cũng cần tham gia khi đánh giá các truy vấn mang tính nhạy cảm, phức tạp cao mà các chỉ số tự động không thể nắm bắt trọn vẹn ngữ cảnh.
 
 ---
 
@@ -144,23 +153,23 @@ và quyết định thiết kế, không chép lại toàn bộ QA.
 
 **Kết quả dataset**
 
-| Hạng mục | Kết quả |
-|---|---|
-| Tổng số records | ____ / 20 |
-| Easy | ____ / 5 |
-| Medium | ____ / 7 |
-| Hard | ____ / 5 |
-| Adversarial | ____ / 3 |
-| Source documents được sử dụng | ____ / 10 |
-| Validator status | PASS / FAIL |
+| Hạng mục                         | Kết quả   |
+| ---------------------------------- | ----------- |
+| Tổng số records                  | ____ / 20   |
+| Easy                               | ____ / 5    |
+| Medium                             | ____ / 7    |
+| Hard                               | ____ / 5    |
+| Adversarial                        | ____ / 3    |
+| Source documents được sử dụng | ____ / 10   |
+| Validator status                   | PASS / FAIL |
 
 **Ba case đại diện cho quyết định thiết kế**
 
 | ID | Difficulty | Source document(s) | Vì sao case phù hợp với difficulty/attack type? |
-|---|---|---|---|
-| | | | |
-| | | | |
-| | | | |
+| -- | ---------- | ------------------ | --------------------------------------------------- |
+|    |            |                    |                                                     |
+|    |            |                    |                                                     |
+|    |            |                    |                                                     |
 
 **Điểm khó nhất khi xây dựng expected answer hoặc evidence là gì?**
 
@@ -183,28 +192,28 @@ python evaluate_answers.py
 
 Copy bảng terminal vào đây hoặc điền từ `artifacts/benchmark_results.json`.
 
-| ID | Question (short) | Ctx Recall | Ctx Precision | Faithfulness | Relevance | Completeness | Overall | Passed? | Failure Type |
-|---|---|---:|---:|---:|---:|---:|---:|---|---|
-| E01 | | | | | | | | | |
-| E02 | | | | | | | | | |
-| E03 | | | | | | | | | |
-| E04 | | | | | | | | | |
-| E05 | | | | | | | | | |
-| M01 | | | | | | | | | |
-| M02 | | | | | | | | | |
-| M03 | | | | | | | | | |
-| M04 | | | | | | | | | |
-| M05 | | | | | | | | | |
-| M06 | | | | | | | | | |
-| M07 | | | | | | | | | |
-| H01 | | | | | | | | | |
-| H02 | | | | | | | | | |
-| H03 | | | | | | | | | |
-| H04 | | | | | | | | | |
-| H05 | | | | | | | | | |
-| A01 | | | | | | | | | |
-| A02 | | | | | | | | | |
-| A03 | | | | | | | | | |
+| ID  | Question (short) | Ctx Recall | Ctx Precision | Faithfulness | Relevance | Completeness | Overall | Passed? | Failure Type |
+| --- | ---------------- | ---------: | ------------: | -----------: | --------: | -----------: | ------: | ------- | ------------ |
+| E01 |                  |            |               |              |           |              |         |         |              |
+| E02 |                  |            |               |              |           |              |         |         |              |
+| E03 |                  |            |               |              |           |              |         |         |              |
+| E04 |                  |            |               |              |           |              |         |         |              |
+| E05 |                  |            |               |              |           |              |         |         |              |
+| M01 |                  |            |               |              |           |              |         |         |              |
+| M02 |                  |            |               |              |           |              |         |         |              |
+| M03 |                  |            |               |              |           |              |         |         |              |
+| M04 |                  |            |               |              |           |              |         |         |              |
+| M05 |                  |            |               |              |           |              |         |         |              |
+| M06 |                  |            |               |              |           |              |         |         |              |
+| M07 |                  |            |               |              |           |              |         |         |              |
+| H01 |                  |            |               |              |           |              |         |         |              |
+| H02 |                  |            |               |              |           |              |         |         |              |
+| H03 |                  |            |               |              |           |              |         |         |              |
+| H04 |                  |            |               |              |           |              |         |         |              |
+| H05 |                  |            |               |              |           |              |         |         |              |
+| A01 |                  |            |               |              |           |              |         |         |              |
+| A02 |                  |            |               |              |           |              |         |         |              |
+| A03 |                  |            |               |              |           |              |         |         |              |
 
 **Aggregate Report**
 
@@ -244,20 +253,20 @@ Chọn 3–5 dimensions:
 - [ ] Dimension khác: __________
 
 | Score | Tiêu chí domain-specific | Ví dụ response |
-|---:|---|---|
-| 5 | | |
-| 4 | | |
-| 3 | | |
-| 2 | | |
-| 1 | | |
+| ----: | -------------------------- | ---------------- |
+|     5 |                            |                  |
+|     4 |                            |                  |
+|     3 |                            |                  |
+|     2 |                            |                  |
+|     1 |                            |                  |
 
 **Ba edge cases khó chấm**
 
 | Edge Case | Tại sao khó chấm? | Rubric xử lý thế nào? |
-|---|---|---|
-| | | |
-| | | |
-| | | |
+| --------- | -------------------- | ------------------------- |
+|           |                      |                           |
+|           |                      |                           |
+|           |                      |                           |
 
 **Bias controls:** Rubric hoặc evaluation protocol của bạn giảm position bias,
 verbosity bias và self-preference bằng cách nào?
@@ -269,13 +278,13 @@ verbosity bias và self-preference bằng cách nào?
 Chỉ làm sau khi hoàn thành 3.1–3.3. Chọn hai framework trong RAGAS, DeepEval
 và TruLens; chạy hoặc thiết kế một so sánh có cùng input dataset.
 
-| Tiêu chí | Framework 1: ____ | Framework 2: ____ |
-|---|---|---|
-| Setup complexity | | |
-| Metrics available | | |
-| CI/CD integration | | |
-| Kết quả trên cùng dataset | | |
-| Insight rút ra | | |
+| Tiêu chí                    | Framework 1: ____ | Framework 2: ____ |
+| ----------------------------- | ----------------- | ----------------- |
+| Setup complexity              |                   |                   |
+| Metrics available             |                   |                   |
+| CI/CD integration             |                   |                   |
+| Kết quả trên cùng dataset |                   |                   |
+| Insight rút ra               |                   |                   |
 
 - Scores có nhất quán không?
 - Framework nào strict hơn và vì sao?
@@ -294,14 +303,14 @@ thay đổi Context Recall hay không.
 4. Rerank cùng tập chunks, không thêm hoặc xóa chunk.
 5. Tính lại hai metrics và giải thích kết quả.
 
-| ID | Recall before | Recall after | Precision before | Precision after | Delta Precision |
-|---|---:|---:|---:|---:|---:|
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| **Avg** | | | | | |
+| ID            | Recall before | Recall after | Precision before | Precision after | Delta Precision |
+| ------------- | ------------: | -----------: | ---------------: | --------------: | --------------: |
+|               |               |              |                  |                 |                 |
+|               |               |              |                  |                 |                 |
+|               |               |              |                  |                 |                 |
+|               |               |              |                  |                 |                 |
+|               |               |              |                  |                 |                 |
+| **Avg** |               |              |                  |                 |                 |
 
 **Tại sao Recall dự kiến không đổi?**
 
