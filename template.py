@@ -25,9 +25,12 @@ The reranking helper is an optional bonus exercise and may remain unimplemented.
 
 from __future__ import annotations
 
+import json
+from multiprocessing import context
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+from unittest import result
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +168,11 @@ class RAGASEvaluator:
         Returns:
             float in [0.0, 1.0] — 1.0 = fully grounded in context.
         """
-        # TODO
-        raise NotImplementedError("Implement evaluate_faithfulness")
+        ans_words = _tokenize(answer)
+        ctx_words = _tokenize(context)
+        if not ans_words:
+            return 1.0  # Answer rỗng trả 1.0
+        return len(ans_words.intersection(ctx_words)) / len(ans_words)
 
     def evaluate_relevance(self, answer: str, question: str) -> float:
         """
@@ -179,8 +185,11 @@ class RAGASEvaluator:
         Returns:
             float in [0.0, 1.0]
         """
-        # TODO
-        raise NotImplementedError("Implement evaluate_relevance")
+        ans_words = _tokenize(answer)
+        q_words = _tokenize(question)
+        if not q_words:
+            return 1.0  # Question rỗng trả 1.0
+        return len(q_words.intersection(ans_words)) / len(q_words)
 
     def evaluate_completeness(self, answer: str, expected: str) -> float:
         """
@@ -193,8 +202,11 @@ class RAGASEvaluator:
         Returns:
             float in [0.0, 1.0]
         """
-        # TODO
-        raise NotImplementedError("Implement evaluate_completeness")
+        ans_words = _tokenize(answer)
+        exp_words = _tokenize(expected)
+        if not exp_words:
+            return 1.0  # Expected rỗng trả 1.0
+        return len(exp_words.intersection(ans_words)) / len(exp_words)
 
     # -----------------------------------------------------------------------
     # Task 2b — Retrieval-side metrics (evaluate the GET-CONTEXT step)
@@ -215,8 +227,17 @@ class RAGASEvaluator:
 
         Low recall => retriever missed evidence the answer needs.
         """
-        # TODO
-        raise NotImplementedError("Implement evaluate_context_recall")
+        exp_words = _tokenize(expected)
+        if not exp_words:
+            return 1.0
+        if not contexts:
+            return 0.0
+
+        # CÁCH XỬ LÝ ĐÚNG LIST: Ghép tất cả các đoạn văn lại thành 1 chuỗi duy nhất rồi mới tokenize
+        all_chunks_text = " ".join(contexts)
+        all_chunk_words = _tokenize(all_chunks_text)
+
+        return len(exp_words.intersection(all_chunk_words)) / len(exp_words)
 
     def evaluate_context_precision(
         self,
@@ -236,8 +257,31 @@ class RAGASEvaluator:
         Return 1.0 if expected empty; 0.0 if no chunks or none relevant.
         Reordering relevant chunks earlier (reranking) raises this score.
         """
-        # TODO
-        raise NotImplementedError("Implement evaluate_context_precision")
+        exp_words = _tokenize(expected)
+        if not exp_words:
+            return 1.0
+        if not contexts:
+            return 0.0
+
+        relevant_chunks = []
+        for chunk in contexts:
+            chunk_words = _tokenize(chunk)
+            coverage = len(exp_words.intersection(chunk_words)) / len(exp_words)
+            relevant_chunks.append(1 if coverage >= relevance_threshold else 0)
+
+        total_relevant = sum(relevant_chunks)
+        if total_relevant == 0:
+            return 0.0
+
+        precision_sum = 0.0
+        relevant_count = 0
+        for i, is_relevant in enumerate(relevant_chunks):
+            if is_relevant:
+                relevant_count += 1
+                precision_at_k = relevant_count / (i + 1)
+                precision_sum += precision_at_k
+
+        return precision_sum / total_relevant
 
     def run_full_eval(
         self,
@@ -269,8 +313,45 @@ class RAGASEvaluator:
         Returns:
             EvalResult with all fields populated.
         """
-        # TODO
-        raise NotImplementedError("Implement run_full_eval")
+        f_score = self.evaluate_faithfulness(answer, context)
+        r_score = self.evaluate_relevance(answer, question)
+        c_score = self.evaluate_completeness(answer, expected)
+
+        passed = (f_score >= 0.5) and (r_score >= 0.5) and (c_score >= 0.5)
+
+        failure_type = None
+        if not passed:
+            if f_score < 0.3:
+                failure_type = "hallucination"
+            elif r_score < 0.3:
+                failure_type = "irrelevant"
+            elif c_score < 0.3:
+                failure_type = "incomplete"
+            else:
+                failure_type = "off_topic"
+
+        qa_pair = QAPair(
+            question=question,
+            expected_answer=expected,
+            context=context,
+            retrieved_contexts=contexts if contexts is not None else []
+        )
+
+        result = EvalResult(
+            qa_pair=qa_pair,
+            actual_answer=answer,
+            faithfulness=f_score,
+            relevance=r_score,
+            completeness=c_score,
+            passed=passed,
+            failure_type=failure_type
+        )
+
+        if contexts is not None:
+            result.context_recall = self.evaluate_context_recall(contexts, expected)
+            result.context_precision = self.evaluate_context_precision(contexts, expected)
+
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +394,7 @@ class LLMJudge:
     """
 
     def __init__(self, judge_llm_fn: Callable[[str], str]) -> None:
-        # TODO: store judge_llm_fn
-        pass
+        self.judge_llm_fn = judge_llm_fn
 
     def score_response(
         self,
@@ -346,8 +426,37 @@ class LLMJudge:
                 "reasoning": str,               # raw LLM explanation
             }
         """
-        # TODO
-        raise NotImplementedError("Implement score_response")
+        prompt = (
+            f"Question: {question}\n"
+            f"Answer: {answer}\n"
+            f"Rubric: {rubric}\n"
+            "Return a JSON object with strictly these keys: 'faithfulness', 'relevance', 'completeness'. "
+            "Values must be floats between 0.0 and 1.0."
+        )
+
+        response_text = self.judge_llm_fn(prompt)
+
+        try:
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}')
+            if start_idx != -1 and end_idx != -1:
+                json_str = response_text[start_idx:end_idx+1]
+                parsed_scores = json.loads(json_str)
+                return {
+                    "scores": {
+                        "faithfulness": float(parsed_scores.get("faithfulness", 0.5)),
+                        "relevance": float(parsed_scores.get("relevance", 0.5)),
+                        "completeness": float(parsed_scores.get("completeness", 0.5))
+                    },
+                    "reasoning": response_text
+                }
+        except Exception:
+            pass
+
+        return {
+            "scores": {"faithfulness": 0.5, "relevance": 0.5, "completeness": 0.5},
+            "reasoning": "Failed to parse JSON scores."
+        }
 
     def detect_bias(self, scores_batch: list[dict[str, Any]]) -> dict[str, Any]:
         """
@@ -368,10 +477,26 @@ class LLMJudge:
                 "severity_bias":   bool,
             }
         """
-        # TODO
-        raise NotImplementedError("Implement detect_bias")
+        if not scores_batch:
+            return {"positional_bias": False, "leniency_bias": False, "severity_bias": False}
 
+        total_score = 0.0
+        count = 0
 
+        # Duyệt qua danh sách các kết quả đánh giá để tính trung bình
+        for batch in scores_batch:
+            scores_dict = batch.get("scores", {})
+            for score in scores_dict.values():
+                total_score += score
+                count += 1
+
+        avg_score = total_score / count if count > 0 else 0.5
+
+        return {
+            "positional_bias": False,
+            "leniency_bias": avg_score > 0.8,
+            "severity_bias": avg_score < 0.3
+        }
 # ---------------------------------------------------------------------------
 # Task 4 — Benchmark Runner
 # ---------------------------------------------------------------------------
