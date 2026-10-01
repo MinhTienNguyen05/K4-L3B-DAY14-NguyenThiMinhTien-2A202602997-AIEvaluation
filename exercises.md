@@ -288,19 +288,21 @@ verbosity bias và self-preference bằng cách nào?
 Chỉ làm sau khi hoàn thành 3.1–3.3. Chọn hai framework trong RAGAS, DeepEval
 và TruLens; chạy hoặc thiết kế một so sánh có cùng input dataset.
 
-| Tiêu chí                    | Framework 1: ____ | Framework 2: ____ |
-| ----------------------------- | ----------------- | ----------------- |
-| Setup complexity              |                   |                   |
-| Metrics available             |                   |                   |
-| CI/CD integration             |                   |                   |
-| Kết quả trên cùng dataset |                   |                   |
-| Insight rút ra               |                   |                   |
+| Tiêu chí                    | Framework 1: RAGAS                                                                                                                                                                                   | Framework 2: DeepEval                                                                                                                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Setup complexity              | Trung bình. Yêu cầu định dạng dữ liệu đầu vào chuẩn (`Dataset` object gồm `question`, `contexts`, `answer`, `ground_truth`), tích hợp chặt chẽ với LangChain/LlamaIndex. | Thấp đến trung bình. Cung cấp kiến trúc test-case hướng đối tượng (`LLMTestCase`), tích hợp trực tiếp theo dạng unit test kiểu Pytest (`assert_test`). |
+| Metrics available             | Tập trung vào kiến trúc tam giác RAG chuẩn: Faithfulness, Answer Relevance, Context Precision, Context Recall, Aspect Critique.                                                                | Đa dạng hơn ngoài RAG: G-Eval (custom rubric linh hoạt), Faithfulness, Answer Relevancy, Hallucination, Bias, Toxicity.                                                  |
+| CI/CD integration             | Phù hợp cho batch evaluation offline hoặc xuất báo cáo Pandas DataFrame để push lên MLflow/W&B; cần tự viết logic assertion cho CI pipeline.                                             | Tối ưu rất tốt cho CI/CD nhờ CLI`deepeval test run`, tích hợp sẵn cơ chế threshold assertion (pass/fail per test case) và web dashboard (Confident AI).          |
+| Kết quả trên cùng dataset | Điểm khắt khe hơn ở Faithfulness (0.501) do cơ chế bóc tách claim nguyên tử rồi đối chiếu nhị phân với context.                                                                   | Điểm Relevance và Faithfulness thường cao hơn (~0.62) nhờ G-Eval cho phép chấm theo chain-of-thought và thang điểm liên tục                                     |
+| Insight rút ra               | RAGAS phát hiện lỗi hallucination rất nhạy khi context bị thiếu từ vựng, nhưng dễ phạt nhầm các câu trả lời ngắn gọn, súc tích.                                                 | DeepEval linh hoạt hơn khi cần tùy biến rubric nghiệp vụ riêng của doanh nghiệp và cung cấp giải thích chi tiết cho từng điểm số.                         |
 
 - Scores có nhất quán không?
 - Framework nào strict hơn và vì sao?
 - Hai framework có tìm ra cùng failure cases không?
 
-> *Phân tích:*
+> * **Tính nhất quán của scores:** Điểm số giữa hai framework không hoàn toàn đồng nhất về mặt tuyệt đối do bản chất thuật toán đánh giá khác nhau. RAGAS chia nhỏ câu trả lời thành từng mệnh đề đơn lẻ rồi dùng LLM kiểm tra xem từng mệnh đề có được suy ra từ context hay không, tạo ra phân phối điểm mang tính rời rạc. DeepEval (đặc biệt khi dùng G-Eval) sử dụng prompt hướng dẫn LLM chấm theo rubric từng bước, dẫn đến điểm số mượt hơn nhưng có độ lệch nhẹ giữa các lần chạy nếu temperature khác 0.
+> * **Mức độ khắt khe:** RAGAS khắt khe hơn ở nhóm metric Generation (Faithfulness). Chỉ cần một câu trả lời chứa thông tin bên lề hợp lý nhưng không xuất hiện nguyên văn trong context retrieved, RAGAS sẽ trừ điểm thẳng tay. DeepEval có độ dung sai cao hơn nhờ khả năng hiểu ngữ cảnh tổng thể.
+> * **Khả năng phát hiện failure cases:** Cả hai framework đều xác định chính xác các failure cases nghiêm trọng nhất trong benchmark (A01, M06, H04). Tuy nhiên, với các case dạng thiếu điều kiện phụ hoặc câu trả lời quá ngắn (như E01 chỉ trả lời "15 W"), RAGAS phạt nặng ở Relevance/Completeness do cơ chế nhúng embedding câu hỏi, trong khi DeepEval nhận diện được đó là câu trả lời đúng trọng tâm.
 
 ### Exercise 3.5 — Retrieval Reranking (Bonus +5)
 
@@ -313,22 +315,25 @@ thay đổi Context Recall hay không.
 4. Rerank cùng tập chunks, không thêm hoặc xóa chunk.
 5. Tính lại hai metrics và giải thích kết quả.
 
-| ID            | Recall before | Recall after | Precision before | Precision after | Delta Precision |
-| ------------- | ------------: | -----------: | ---------------: | --------------: | --------------: |
-|               |               |              |                  |                 |                 |
-|               |               |              |                  |                 |                 |
-|               |               |              |                  |                 |                 |
-|               |               |              |                  |                 |                 |
-|               |               |              |                  |                 |                 |
-| **Avg** |               |              |                  |                 |                 |
+| ID            |   Recall before |    Recall after | Precision before | Precision after |  Delta Precision |
+| :------------ | --------------: | --------------: | ---------------: | --------------: | ---------------: |
+| **E02** |           0.857 |           0.857 |            0.833 |           1.000 |           +0.167 |
+| **E05** |           0.688 |           0.688 |            0.867 |           1.000 |           +0.133 |
+| **M02** |           0.923 |           0.923 |            0.867 |           1.000 |           +0.133 |
+| **H01** |           0.895 |           0.895 |            0.867 |           1.000 |           +0.133 |
+| **H05** |           0.826 |           0.826 |            0.700 |           0.850 |           +0.150 |
+| **Avg** | **0.838** | **0.838** |  **0.827** | **0.970** | **+0.143** |
 
 **Tại sao Recall dự kiến không đổi?**
 
-> *Câu trả lời:*
+> Context Recall đo lường độ phủ thông tin của toàn bộ tập hợp các chunks lấy về so với câu trả lời chuẩn (Ground Truth). Thuật toán Reranking chỉ sắp xếp lại vị trí (thứ hạng) của các chunks bên trong cùng một danh sách cố định. Vì không có chunk nào bị xóa đi hay thêm mới vào tập hợp, tổng lượng thông tin ngữ cảnh được giữ nguyên 100%, do đó điểm Recall về mặt toán học không thay đổi.
 
 **Khi nào reranking không đủ và cần sửa retriever/query/chunking?**
 
-> *Câu trả lời:*
+> Reranking sẽ bất lực khi bản thân tập chunks lấy về ban đầu đã sai hoặc thiếu.
+>
+> 1. **Cần sửa Query/Retriever:** Khi Recall quá thấp (tài liệu đúng không lọt nổi vào top-K để mà rerank), nguyên nhân thường do khác biệt từ vựng (khách hàng dùng tiếng lóng, tài liệu dùng từ chuyên môn). Lúc này cần áp dụng Query Expansion hoặc chuyển từ BM25 sang Hybrid Search.
+> 2. **Cần sửa Chunking:** Khi câu trả lời lạc đề (Relevance thấp) do thông tin bị cắt vụn mất ngữ cảnh, reranker sẽ không thể đánh giá đúng. Lúc này bắt buộc phải tăng `chunk_size` hoặc `chunk_overlap` ở khâu nhúng dữ liệu ban đầu.
 
 ---
 
@@ -342,11 +347,11 @@ Hoàn thành `reflection.md` bằng kết quả thật từ Exercise 3.2.
 
 Hoàn thành kiểm tra cuối trong khoảng 11:50–12:00.
 
-- [ ] Tất cả required tests pass.
-- [ ] `golden_dataset.json` validate thành công.
-- [ ] Exercise 3.1 hoàn thành trong file JSON và bảng kết quả phía trên.
-- [ ] Exercise 3.2 có năm metrics, aggregate report và ba cases thấp nhất.
-- [ ] Exercise 3.3 có rubric 1–5 và bias controls.
-- [ ] `reflection.md` có ba failure analyses và regression strategy.
-- [ ] Đã copy `template.py` thành `solution/solution.py`.
-- [ ] Exercise 3.4 và 3.5 chỉ làm nếu chọn bonus.
+- [X] Tất cả required tests pass.
+- [X] `golden_dataset.json` validate thành công.
+- [X] Exercise 3.1 hoàn thành trong file JSON và bảng kết quả phía trên.
+- [X] Exercise 3.2 có năm metrics, aggregate report và ba cases thấp nhất.
+- [X] Exercise 3.3 có rubric 1–5 và bias controls.
+- [X] `reflection.md` có ba failure analyses và regression strategy.
+- [X] Đã copy `template.py` thành `solution/solution.py`.
+- [X] Exercise 3.4 và 3.5 chỉ làm nếu chọn bonus.
